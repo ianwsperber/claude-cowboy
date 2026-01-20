@@ -5,7 +5,7 @@
 
 A tmux-based session manager for [Claude Code](https://github.com/anthropics/claude-code). Monitor, manage, and switch between multiple Claude Code sessions from the command line.
 
-![Claude Cowboy Demo](docs/cowboy-demo.gif)
+https://github.com/user-attachments/assets/1d3d8c32-05aa-4fdb-974a-086897dc9942
 
 ## Features
 
