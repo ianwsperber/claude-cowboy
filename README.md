@@ -42,10 +42,17 @@ Choose one method:
 uv tool install git+https://github.com/ianwsperber/claude-cowboy
 ```
 
+**Using pipx**
+```bash
+pipx install git+https://github.com/ianwsperber/claude-cowboy
+```
+
 **Using pip**
 ```bash
-pip install git+https://github.com/ianwsperber/claude-cowboy
+pip install --user git+https://github.com/ianwsperber/claude-cowboy
 ```
+
+> **Note**: The `--user` flag installs to `~/.local/bin`, which should be in your PATH on most systems. If `cowboy` isn't found after installation, see [Troubleshooting](#troubleshooting) below.
 
 **From source**
 ```bash
@@ -136,6 +143,30 @@ Settings are stored in `~/.claude/settings.json` under the `claudeCowboy` key:
 | `hideThresholdMinutes` | 15 | Time before inactive sessions are hidden |
 | `maxWorktrees` | 3 | Max idle worktrees before cleanup (home only) |
 | `worktreeLocation` | `home` | Default: `home` (~/.cowboy-worktrees) or `sibling` |
+
+## Troubleshooting
+
+### `cowboy: command not found`
+
+If the `cowboy` command isn't found after pip installation, the install location isn't in your PATH.
+
+**Find where it was installed:**
+```bash
+python -m site --user-base  # Shows ~/.local on most systems
+# The executable is in the bin/ subdirectory
+```
+
+**Add to PATH** (add to your `~/.bashrc`, `~/.zshrc`, or equivalent):
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+**Or reinstall with uv/pipx** (recommended - they handle PATH automatically):
+```bash
+pip uninstall claude-cowboy
+uv tool install git+https://github.com/ianwsperber/claude-cowboy
+# or: pipx install git+https://github.com/ianwsperber/claude-cowboy
+```
 
 ## Acknowledgments
 
