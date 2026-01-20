@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""Claude Cowboy CLI wrapper.
+
+This script invokes the cowboy_cli module from the claude-cowboy package.
+"""
+
+import os
+import sys
+
+# Add the parent directory to path so we can import lib
+# Use realpath to resolve symlinks (for dev installs)
+script_dir = os.path.dirname(os.path.realpath(__file__))
+project_dir = os.path.dirname(script_dir)
+sys.path.insert(0, project_dir)
+
+from lib.cowboy_cli import main
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,7 @@
+{
+  "name": "claude-cowboy",
+  "description": "Multi-session monitor and orchestrator for Claude Code. View all active sessions, their status, and enable cross-session communication.",
+  "author": {
+    "name": "Ian Walker-Sperber"
+  }
+}
