@@ -26,28 +26,59 @@ https://github.com/user-attachments/assets/1d3d8c32-05aa-4fdb-974a-086897dc9942
 
 ## Installation
 
-### Using uv (recommended)
+Claude Cowboy has two components that work together:
 
+1. **CLI** (`cowboy` command) - Python package for session management
+2. **Plugin** - Claude Code integration for `/sessions`, `/lasso`, `/posse` commands
+
+**Both are required** - the plugin commands call the CLI under the hood.
+
+### Step 1: Install the CLI
+
+Choose one method:
+
+**Using uv (recommended)**
 ```bash
-# Install as a CLI tool (isolated environment)
 uv tool install git+https://github.com/ianwsperber/claude-cowboy
-
-# Or install in your current environment
-uv pip install git+https://github.com/ianwsperber/claude-cowboy
 ```
 
-### Using pip
-
+**Using pip**
 ```bash
 pip install git+https://github.com/ianwsperber/claude-cowboy
 ```
 
-### From source
-
+**From source**
 ```bash
 git clone https://github.com/ianwsperber/claude-cowboy.git
 cd claude-cowboy
 uv pip install -e .  # or: pip install -e .
+```
+
+### Step 2: Install the Plugin
+
+In Claude Code, run:
+
+```
+/plugin marketplace add ianwsperber/claude-cowboy
+/plugin install cowboy@claude-cowboy
+```
+
+This enables:
+- `/sessions` - List all active Claude Code sessions
+- `/lasso` - Delegate tasks to new sessions asynchronously
+- `/posse` - Coordinate multiple parallel sessions
+- Status tracking hooks (working/done/needs attention)
+
+### Verify Installation
+
+```bash
+# Check CLI is installed
+cowboy --help
+```
+
+In Claude Code, verify the plugin is loaded:
+```
+/sessions
 ```
 
 ## Usage

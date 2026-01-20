@@ -1,5 +1,6 @@
 {
-  "name": "claude-cowboy",
+  "name": "cowboy",
+  "version": "0.1.0",
   "description": "Multi-session monitor and orchestrator for Claude Code. View all active sessions, their status, and enable cross-session communication.",
   "author": {
     "name": "Ian Walker-Sperber"

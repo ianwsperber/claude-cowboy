@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "claude-cowboy",
+  "version": "0.1.0",
+  "description": "Multi-session monitor and orchestrator for Claude Code",
+  "owner": {
+    "name": "Ian Walker-Sperber"
+  },
+  "plugins": [
+    {
+      "name": "cowboy",
+      "description": "Multi-session monitor and orchestrator for Claude Code. View all active sessions, their status, and enable cross-session communication via commands like /sessions, /lasso, and /posse.",
+      "version": "0.1.0",
+      "source": "./plugins/cowboy",
+      "category": "productivity"
+    }
+  ]
+}
