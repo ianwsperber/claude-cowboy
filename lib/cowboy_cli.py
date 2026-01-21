@@ -30,7 +30,7 @@ try:
     from . import orchestration
     from . import session_context
     from .config import load_config
-    from .status_analyzer import analyze_session_status, get_status_emoji, SessionStatus
+    from .status_analyzer import analyze_session_status, get_status_emoji, SessionStatus, wait_for_session_idle
 except ImportError:
     import tmux_manager as tmux
     import session_registry as registry
@@ -38,7 +38,7 @@ except ImportError:
     import orchestration
     import session_context
     from config import load_config
-    from status_analyzer import analyze_session_status, get_status_emoji, SessionStatus
+    from status_analyzer import analyze_session_status, get_status_emoji, SessionStatus, wait_for_session_idle
 
 
 def get_sessions_for_cwd(cwd: str) -> list[str]:
@@ -605,193 +605,139 @@ def cmd_configure_status(args) -> int:
 
 
 def cmd_lasso(args) -> int:
-    """Delegate a task to a new Claude session asynchronously.
+    """Query another Claude session synchronously.
 
-    Creates a child session, starts Claude with the task, and returns immediately.
-    The parent session continues working while the child executes the task.
+    Resumes the target session with a prompt and waits for the response.
     """
-    if not tmux.is_tmux_available():
-        print("Error: tmux is not installed or not available", file=sys.stderr)
+    # Get target and prompt from args
+    target = args.target or ""
+    prompt_parts = args.prompt or []
+    prompt = " ".join(prompt_parts) if prompt_parts else ""
+
+    if not prompt:
+        print("Error: No query provided", file=sys.stderr)
+        print("Usage: cowboy lasso [target] <query>", file=sys.stderr)
         return 1
 
-    # Get task description from arguments
-    task = args.task
-    if not task:
-        print("Error: No task provided", file=sys.stderr)
-        return 1
+    # Load config for timeout settings
+    config = load_config()
+    timeout_minutes = getattr(args, "timeout", None) or config.get("lassoTimeoutMinutes", 8)
+    timeout_seconds = timeout_minutes * 60
 
-    # Determine working directory
-    cwd = args.cwd if args.cwd else os.getcwd()
-    cwd = os.path.abspath(os.path.expanduser(cwd))
+    # Handle clean mode (new session instead of resume)
+    if getattr(args, "clean", False):
+        cwd = args.cwd if args.cwd else os.getcwd()
+        cwd = os.path.abspath(os.path.expanduser(cwd))
 
-    if not os.path.isdir(cwd):
-        print(f"Error: Directory does not exist: {cwd}", file=sys.stderr)
-        return 1
-
-    # Get parent session info from environment
-    parent_tmux = os.environ.get("CLAUDE_SESSION_ID", tmux.get_current_session() or "unknown")
-    parent_session_id = os.environ.get("CLAUDE_SESSION_UUID", parent_tmux)
-
-    # Generate child session name
-    if args.name:
-        child_name = args.name.replace(".", "-").replace(":", "-")
-    else:
-        # Generate from task keywords + random suffix
-        import re
-        import secrets
-        words = re.findall(r'\w+', task.lower())[:2]
-        keyword = "-".join(words) if words else "task"
-        suffix = secrets.token_hex(2)  # 4 hex chars
-        base_name = f"{parent_tmux}-{keyword}-{suffix}"
-        child_name = base_name.replace(".", "-").replace(":", "-")
-
-    # Ensure unique name
-    while tmux.session_exists(child_name):
-        import secrets
-        child_name = f"{child_name}-{secrets.token_hex(2)}"
-
-    # Load config for worktree settings
-    config = load_config(cwd)
-
-    # Handle worktree mode (-w flag)
-    if getattr(args, "worktree", False):
-        if not worktree.is_git_repo(cwd):
-            print("Error: --worktree requires a git repository", file=sys.stderr)
+        if not os.path.isdir(cwd):
+            print(f"Error: Directory does not exist: {cwd}", file=sys.stderr)
             return 1
 
-        repo_root = worktree.get_repo_root(cwd)
-        location = getattr(args, "worktree_location", None) or config.get("worktreeLocation", "home")
-        source_branch = worktree.get_current_branch(repo_root)
-        active_cwds = worktree.get_active_session_cwds()
+        # Build /lassoed prompt with flags
+        parent_cwd = os.getcwd()
+        parent_session = os.environ.get("TMUX_PANE", "unknown")
+        lassoed_prompt = _build_lassoed_prompt(parent_cwd, parent_session, prompt)
 
-        # Try to reuse an existing idle worktree
-        worktree_path = worktree.find_reusable_worktree(repo_root, active_cwds, location)
+        # Run headless claude in clean mode
+        plugin_dir = os.environ.get("COWBOY_PLUGIN_DIR")
+        cmd = ["claude"]
+        if plugin_dir:
+            cmd.extend(["--plugin-dir", plugin_dir])
+        cmd.extend(["-p", lassoed_prompt])
 
-        if worktree_path:
-            worktree.prepare_reused_worktree(worktree_path, source_branch)
-            cwd = worktree_path
-        else:
-            try:
-                cwd, _ = worktree.create_worktree(repo_root, location, source_branch)
-            except subprocess.CalledProcessError as e:
-                print(f"Error: Failed to create worktree: {e}", file=sys.stderr)
-                return 1
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                cwd=cwd,
+            )
+            print(result.stdout)
+            if result.stderr:
+                print(result.stderr, file=sys.stderr)
+            return result.returncode
+        except subprocess.TimeoutExpired:
+            print(f"Error: Lasso timed out after {timeout_minutes} minutes", file=sys.stderr)
+            return 1
+        except FileNotFoundError:
+            print("Error: claude CLI not found", file=sys.stderr)
+            return 1
 
-    # Create orchestration entry
-    orch = orchestration.create_orchestration(
-        orch_type="lasso",
-        parent_session_id=parent_session_id,
-        parent_tmux_session=parent_tmux,
-    )
-
-    # Create child tmux session
-    if not tmux.create_claude_session(child_name, cwd):
-        print(f"Error: Failed to create tmux session: {child_name}", file=sys.stderr)
+    # Resolve target to session UUID and CWD
+    try:
+        session_uuid, cwd = session_context.resolve_lasso_target(target)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        print("\nAvailable sessions:")
+        subprocess.run(["cowboy", "list"], check=False)
         return 1
 
-    # Add child to orchestration
-    orchestration.add_child_to_orchestration(
-        orch_id=orch.id,
-        tmux_session=child_name,
-        role="async-task",
-        task=task,
-    )
+    # Wait for session to be idle
+    poll_interval = config.get("lassoPollIntervalSeconds", 2.0)
+    max_poll_interval = config.get("lassoMaxPollIntervalSeconds", 10.0)
 
-    # Write task file for child to read
-    orchestration.write_task_file(
-        child_session_id=child_name,
-        orchestration_id=orch.id,
-        orchestration_type="lasso",
-        parent_session_id=parent_session_id,
-        parent_tmux_session=parent_tmux,
-        role="async-task",
-        task=task,
+    ok, msg = wait_for_session_idle(
+        session_uuid,
+        timeout_seconds=timeout_seconds,
+        poll_interval=poll_interval,
+        max_poll_interval=max_poll_interval,
     )
+    if not ok:
+        print(f"Error: {msg}", file=sys.stderr)
+        return 1
+    if msg:
+        print(msg, file=sys.stderr)
 
-    # Build claude command - interactive session with /deputized command
-    # Use -- to pass initial prompt to interactive session (not -p which is headless)
+    # Build /lassoed prompt with flags
+    parent_cwd = os.getcwd()
+    parent_session = os.environ.get("TMUX_PANE", tmux.get_current_session() or "unknown")
+    lassoed_prompt = _build_lassoed_prompt(parent_cwd, parent_session, prompt)
+
+    # Build and execute claude command
     plugin_dir = os.environ.get("COWBOY_PLUGIN_DIR")
-    base_cmd = f"claude --plugin-dir {plugin_dir}" if plugin_dir else "claude"
-    task_file_path = orchestration.get_task_file_path(child_name)
-    claude_cmd = f'{base_cmd} -- "/claude-cowboy:deputized {task_file_path}"'
+    cmd = ["claude", "--resume", session_uuid]
+    if plugin_dir:
+        cmd.extend(["--plugin-dir", plugin_dir])
+    cmd.extend(["-p", lassoed_prompt])
 
-    # Start Claude with the /deputized command in the child session
-    tmux.send_keys(0, claude_cmd, session_name=child_name)
-
-    # Update child status to working
-    orchestration.update_child_status(
-        orch_id=orch.id,
-        child_tmux_session=child_name,
-        status="working",
-    )
-
-    # Output result (this will be shown to the user via Claude)
-    worktree_note = " (worktree)" if getattr(args, "worktree", False) else ""
-    print(f"""Lasso task delegated to session: {child_name}{worktree_note}
-
-Task: {task}
-
-You'll be notified (visual + sound) when the task completes.
-Check status anytime with: /sessions
-Switch to child: tmux attach -t {child_name}
-
-Continuing with your work...""")
-
-    return 0
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            cwd=cwd,
+        )
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+        return result.returncode
+    except subprocess.TimeoutExpired:
+        print(f"Error: Lasso timed out after {timeout_minutes} minutes", file=sys.stderr)
+        return 1
+    except FileNotFoundError:
+        print("Error: claude CLI not found", file=sys.stderr)
+        return 1
 
 
-def cmd_lasso_context(args) -> int:
-    """Output a session's full conversation context for the lasso subagent.
+def _build_lassoed_prompt(parent_cwd: str, parent_session: str, query: str) -> str:
+    """Build the /lassoed prompt with flags.
 
-    This command loads a Claude session's JSONL file and outputs a formatted
-    transcript that can be read by the lasso subagent.
+    Uses flags instead of JSON to avoid shell escaping issues.
+
+    Args:
+        parent_cwd: Parent session's working directory.
+        parent_session: Parent's tmux session name.
+        query: The actual query.
+
+    Returns:
+        Formatted prompt string for /lassoed skill.
     """
-    from pathlib import Path
-
-    # Resolve target session to JSONL path
-    jsonl_path = None
-    session_name = None
-
-    if hasattr(args, 'jsonl') and args.jsonl:
-        # Direct JSONL path provided
-        jsonl_path = Path(args.jsonl)
-        session_name = jsonl_path.stem
-    elif hasattr(args, 'uuid') and args.uuid:
-        # Look up by UUID
-        jsonl_path = session_context.find_jsonl_by_uuid(args.uuid)
-        session_name = args.uuid
-    elif hasattr(args, 'session') and args.session:
-        # Look up by tmux session name
-        jsonl_path = session_context.find_session_jsonl(args.session)
-        session_name = args.session
-    else:
-        print("Error: Specify --session NAME, --uuid UUID, or --jsonl PATH", file=sys.stderr)
-        return 1
-
-    if not jsonl_path or not jsonl_path.exists():
-        print(f"Error: Could not find JSONL for '{session_name}'", file=sys.stderr)
-        return 1
-
-    # Load and format transcript
-    transcript = session_context.load_jsonl_transcript(jsonl_path)
-
-    # Get session metadata
-    cwd = session_context.get_tmux_session_cwd(session_name) if session_name else None
-    branch = session_context.get_git_branch(cwd) if cwd else None
-
-    # Output formatted context
-    print(f"# Session: {session_name}")
-    print(f"# JSONL: {jsonl_path}")
-    if cwd:
-        print(f"# CWD: {cwd}")
-    if branch:
-        print(f"# Git Branch: {branch}")
-    print()
-    print("## Conversation Transcript")
-    print()
-    print(transcript)
-
-    return 0
+    # Escape double quotes in query
+    escaped_query = query.replace('"', '\\"')
+    # Build prompt with flags
+    return f'/claude-cowboy:lassoed --parent-cwd "{parent_cwd}" --parent-session "{parent_session}" "{escaped_query}"'
 
 
 def cmd_posse(args) -> int:
@@ -1108,25 +1054,15 @@ def main():
     # configure-status - apply status bar to all Claude sessions
     subparsers.add_parser("configure-status", help="Configure status bar for all Claude sessions")
 
-    # lasso - delegate task to new session (legacy, kept for backwards compat)
-    lasso_parser = subparsers.add_parser("lasso", help="Delegate a task to a new Claude session")
-    lasso_parser.add_argument("task", nargs="?", help="Task description")
-    lasso_parser.add_argument("--name", "-n", help="Custom name for the child session")
-    lasso_parser.add_argument("--cwd", "-c", help="Working directory (default: current)")
-    lasso_parser.add_argument("--worktree", "-w", action="store_true",
-        help="Create session in a git worktree for isolation")
-    lasso_parser.add_argument("--worktree-location", choices=["home", "sibling"],
-        help="Where to create worktrees")
-
-    # lasso-context - output session context for lasso subagent
-    lasso_context_parser = subparsers.add_parser("lasso-context",
-        help="Output a session's conversation context for the lasso subagent")
-    lasso_context_parser.add_argument("--session", "-s",
-        help="Target session by tmux session name")
-    lasso_context_parser.add_argument("--uuid", "-u",
-        help="Target session by Claude session UUID")
-    lasso_context_parser.add_argument("--jsonl", "-j",
-        help="Direct path to JSONL file")
+    # lasso - query another Claude session synchronously
+    lasso_parser = subparsers.add_parser("lasso", help="Query another Claude session synchronously")
+    lasso_parser.add_argument("target", nargs="?", help="Target session (tmux name or UUID)")
+    lasso_parser.add_argument("prompt", nargs="*", help="Query/task for the session")
+    lasso_parser.add_argument("--clean", "-c", action="store_true",
+        help="Create new session instead of resuming existing")
+    lasso_parser.add_argument("--cwd", help="Working directory for clean mode (default: current)")
+    lasso_parser.add_argument("--timeout", "-t", type=int,
+        help="Timeout in minutes (default: 8)")
 
     # posse - coordinate multiple sessions
     posse_parser = subparsers.add_parser("posse", help="Coordinate work across multiple Claude sessions")
@@ -1166,7 +1102,6 @@ def main():
         "t": cmd_tmux,
         "configure-status": cmd_configure_status,
         "lasso": cmd_lasso,
-        "lasso-context": cmd_lasso_context,
         "posse": cmd_posse,
         "doctor": cmd_doctor,
     }
