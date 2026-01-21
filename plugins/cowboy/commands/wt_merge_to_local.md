@@ -52,13 +52,34 @@ Parse the first line of `git worktree list` to get the main worktree path. Then 
 git --git-dir=/path/to/main/.git branch --show-current
 ```
 
-### Step 5: Perform the merge
+### Step 5: Analyze commits for semantic message
+
+Before merging, review the commits on the branch to create a semantic commit message:
 
 ```bash
-cd /path/to/main/worktree && git merge <branch-name>
+git log main..<branch-name> --oneline
 ```
 
-### Step 6: Clean up (unless --no-delete)
+Based on the commit history, create a semantic merge commit message that:
+- Uses conventional commit format (e.g., `feat:`, `fix:`, `refactor:`, `docs:`)
+- Summarizes the overall change
+- Includes the original merge info in parentheses at the end
+- Is concise but descriptive
+
+Examples of good merge messages:
+- `feat: Add synchronous lasso command for cross-session queries (Merge branch 'feature-x')`
+- `fix: Resolve race condition in session status polling (Merge branch 'fix-polling')`
+- `refactor: Remove deprecated async lasso features (Merge branch 'cleanup-async')`
+
+### Step 6: Perform the merge with semantic message
+
+```bash
+cd /path/to/main/worktree && git merge <branch-name> -m "<semantic-message>"
+```
+
+**Important**: Always use `-m` with a descriptive semantic commit message. Never use the default "Merge branch 'x'" message.
+
+### Step 7: Clean up (unless --no-delete)
 
 If merge succeeded and `--no-delete` was NOT passed:
 
@@ -85,11 +106,15 @@ Report the result to the user, showing:
 ## Example Usage
 
 ```
-$ /cowboy_wt_merge_to_local
+$ /wt_merge_to_local
+Analyzing commits on 'feature-x'...
+  - abc1234 Add session query command
+  - def5678 Implement wait-for-idle logic
+
 Merging branch 'feature-x' into main at ~/Code/claude-cowboy...
 
 Merge successful:
-  Commit: abc1234 Merge branch 'feature-x'
+  Commit: 789abcd feat: Add synchronous session query command (Merge branch 'feature-x')
   Branch 'feature-x' deleted.
 
 Changes are local only. Use 'git push' in the main repo to publish.
