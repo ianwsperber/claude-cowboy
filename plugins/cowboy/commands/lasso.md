@@ -86,4 +86,3 @@ Response: "I was working on the authentication module..."
 - The target session is **resumed** with your query - it has full context of its prior work
 - If the target is busy, lasso waits for it to become idle (up to 8 minutes by default)
 - Use `--timeout N` to set a custom timeout in minutes
-- For async task delegation, use: `cowboy lasso --async "task description"`

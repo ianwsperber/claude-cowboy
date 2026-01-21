@@ -133,9 +133,6 @@ the target session with a headless prompt and returns the response.
 
 # Clean mode (new session, no resume)
 cowboy lasso --clean --cwd /project "Review the codebase"
-
-# Legacy async delegation mode
-cowboy lasso --async "Implement the auth feature"
 ```
 
 ### Orchestration (/posse)
@@ -256,7 +253,6 @@ The `cowboy` CLI provides session management:
 | `cowboy cleanup`   |       | Clean up stale data (orchestrations, worktrees, registry) |
 | `cowboy tmux`      | t     | Attach to the cowboy tmux session        |
 | `cowboy lasso`     |       | Query another session synchronously      |
-| `cowboy lasso-async` |     | Delegate task to new session (legacy)    |
 | `cowboy posse`     |       | Coordinate multiple sessions (parallel)  |
 | `cowboy doctor`    |       | Check system dependencies                |
 
@@ -267,7 +263,6 @@ cowboy new ~/project -w              # Use worktree for isolation
 cowboy new ~/project --name myname   # Custom session name
 cowboy lasso my-session "query"      # Query another session
 cowboy lasso --clean --cwd /path "q" # Query in new session
-cowboy lasso --async "task"          # Legacy async mode
 cowboy posse --plan-file plan.json   # Start posse from plan file
 ```
 
