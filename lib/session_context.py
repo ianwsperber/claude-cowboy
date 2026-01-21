@@ -149,6 +149,79 @@ def find_jsonl_by_uuid(uuid: str) -> Optional[Path]:
     return None
 
 
+def resolve_lasso_target(target: str) -> tuple[str, str]:
+    """Resolve a target string to (session_uuid, cwd).
+
+    Target can be:
+    - tmux session name (e.g., "my-project-01")
+    - Claude session UUID (full or partial, e.g., "abc123-...")
+    - Empty string (raises ValueError - requires discovery)
+
+    Args:
+        target: Target session identifier.
+
+    Returns:
+        Tuple of (session_uuid, cwd).
+
+    Raises:
+        ValueError: If target cannot be resolved or is empty.
+    """
+    if not target or not target.strip():
+        raise ValueError("No target specified - use discovery mode to select a session")
+
+    target = target.strip()
+
+    # Check if it looks like a UUID (contains hyphens and is long enough)
+    if "-" in target and len(target) > 20:
+        # Try to find by UUID
+        jsonl_path = find_jsonl_by_uuid(target)
+        if jsonl_path:
+            session_uuid = jsonl_path.stem
+            # Try to get CWD from the project directory path
+            cwd = _extract_cwd_from_project_path(jsonl_path.parent)
+            return session_uuid, cwd
+        raise ValueError(f"Could not find session with UUID: {target}")
+
+    # Otherwise treat as tmux session name
+    cwd = get_tmux_session_cwd(target)
+    if not cwd:
+        raise ValueError(f"Could not find tmux session or get CWD: {target}")
+
+    # Find the JSONL file to get the session UUID
+    jsonl_path = find_session_jsonl(target)
+    if not jsonl_path:
+        raise ValueError(f"Could not find JSONL for session: {target}")
+
+    session_uuid = jsonl_path.stem
+    return session_uuid, cwd
+
+
+def _extract_cwd_from_project_path(project_dir: Path) -> str:
+    """Extract the original CWD from a Claude project directory path.
+
+    Claude stores sessions in ~/.claude/projects/{encoded_path}/
+    where {encoded_path} is the CWD with / replaced by -
+
+    Args:
+        project_dir: Path to the project directory.
+
+    Returns:
+        Reconstructed CWD path.
+    """
+    # The project directory name is the encoded path
+    encoded = project_dir.name
+    # Convert back: leading dash becomes /, internal dashes become /
+    # This is imperfect but works for most paths
+    if encoded.startswith("-"):
+        encoded = encoded[1:]
+    cwd = "/" + encoded.replace("-", "/")
+
+    # Simplify common patterns
+    cwd = cwd.replace("//", "/")
+
+    return cwd
+
+
 def format_assistant_message(entry: dict) -> str:
     """Format an assistant message entry.
 

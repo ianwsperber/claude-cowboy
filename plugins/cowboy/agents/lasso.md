@@ -1,12 +1,16 @@
 ---
 name: lasso
-description: Query another Claude session's context synchronously. Use when you need to ask another session what it was working on, debug issues, or get context from parallel work.
+description: (DEPRECATED) Query another Claude session's context. This agent is deprecated - use the /lasso command which now resumes sessions directly.
 model: sonnet
 tools: Bash(cowboy:*), Read, Glob, Grep, AskUserQuestion
 color: yellow
 ---
 
-# Lasso Context Query Agent
+# Lasso Context Query Agent (DEPRECATED)
+
+> **Note:** This agent is deprecated. The `/lasso` command now uses `claude --resume` to
+> directly resume and query target sessions, which is more efficient and provides better
+> context. This agent is kept for backwards compatibility with older workflows.
 
 You help answer questions about another Claude Code session's work by loading and analyzing that session's full conversation history.
 

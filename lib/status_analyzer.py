@@ -92,6 +92,54 @@ def get_wait_dir() -> Path:
     return get_cowboy_data_dir() / "wait"
 
 
+def wait_for_session_idle(
+    session_id: str,
+    timeout_seconds: int = 480,  # 8 minutes default
+    poll_interval: float = 2.0,
+    max_poll_interval: float = 10.0,
+) -> tuple[bool, str]:
+    """Wait for a session to become idle (not working).
+
+    Polls the session status until it's no longer WORKING, or timeout is reached.
+    Uses exponential backoff to avoid excessive polling.
+
+    Args:
+        session_id: The session UUID to monitor.
+        timeout_seconds: Maximum time to wait (default 8 minutes).
+        poll_interval: Initial polling interval in seconds.
+        max_poll_interval: Maximum polling interval (for backoff).
+
+    Returns:
+        Tuple of (success, message):
+        - (True, "") if session became idle
+        - (False, error_message) if timeout or other error
+    """
+    if not session_id:
+        return False, "No session ID provided"
+
+    start_time = time.time()
+    current_interval = poll_interval
+    last_status = None
+
+    while True:
+        elapsed = time.time() - start_time
+        if elapsed >= timeout_seconds:
+            return False, f"Timeout waiting for session to become idle (waited {int(elapsed)}s)"
+
+        status, suffix = get_session_status(session_id)
+        last_status = status
+
+        # Session is idle - we can proceed
+        if status != SessionStatus.WORKING:
+            if status == SessionStatus.NEEDS_INPUT:
+                return True, "Warning: Session is waiting for user input"
+            return True, ""
+
+        # Still working - wait and retry with backoff
+        time.sleep(current_interval)
+        current_interval = min(current_interval * 1.2, max_poll_interval)
+
+
 def get_session_status(session_id: str) -> tuple[SessionStatus, str]:
     """Get session status from hook status file.
 

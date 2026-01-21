@@ -12,9 +12,11 @@ claude-cowboy/
 │   └── plugin.json          # Plugin manifest
 ├── commands/
 │   ├── sessions.md          # /sessions command definition
-│   ├── lasso.md             # /lasso async delegation command
+│   ├── lasso.md             # /lasso synchronous session query
 │   ├── posse.md             # /posse multi-session orchestration
 │   └── deputized.md         # Child session bootstrapping
+├── skills/
+│   └── lassoed.md           # Handler for incoming lasso queries
 ├── hooks/
 │   └── status-hook.sh       # Claude Code hook for status tracking
 ├── lib/
@@ -107,21 +109,47 @@ Manual cleanup: `cowboy cleanup`
 
 Cleanup is async and non-blocking - the dashboard opens immediately while cleanup runs in the background.
 
-### Orchestration (/lasso and /posse)
+### Cross-Session Communication (/lasso)
 
-Orchestration enables parent sessions to spawn and coordinate child Claude sessions.
+The `/lasso` command enables synchronous querying of other Claude sessions. It resumes
+the target session with a headless prompt and returns the response.
 
-**Two orchestration modes:**
+**How it works:**
+
+1. Parent session runs `/lasso @target-session "What files did you modify?"`
+2. CLI resolves target to session UUID and CWD
+3. CLI waits for target session to become idle (if busy)
+4. CLI runs `claude --resume <uuid> -p "/lassoed ..."` to query the target
+5. Target session answers using its full context
+6. Response is returned synchronously to the parent
+
+**Usage:**
+```bash
+# Query a specific session
+/lasso @backend-work What API endpoints did you implement?
+
+# Query with session discovery (prompts for selection)
+/lasso What was the last thing you did?
+
+# Clean mode (new session, no resume)
+cowboy lasso --clean --cwd /project "Review the codebase"
+
+# Legacy async delegation mode
+cowboy lasso --async "Implement the auth feature"
+```
+
+### Orchestration (/posse)
+
+The `/posse` command enables coordination of multiple parallel Claude sessions.
 
 | Command  | Purpose                              | Child Count |
 | -------- | ------------------------------------ | ----------- |
-| `/lasso` | Delegate a task asynchronously       | 1           |
 | `/posse` | Coordinate parallel workstreams      | 2-4         |
 
 **How it works:**
 
-1. Parent session runs `/lasso <task>` or `/posse <objective>`
-2. Parent calls `cowboy lasso` or `cowboy posse` CLI command
+1. Parent session runs `/posse <objective>`
+2. Parent calls `cowboy posse` CLI command
 3. CLI creates orchestration entry in `~/.claude/cowboy/orchestration.json`
 4. CLI writes task file(s) to `~/.claude/cowboy/tasks/{child-name}.task.json`
 5. CLI spawns tmux session(s) and starts Claude with `/claude-cowboy:deputized`
@@ -200,6 +228,9 @@ Settings in `~/.claude/settings.json` under `claudeCowboy`:
 | `showPreview`             | true    | Show pane preview in session browser             |
 | `maxWorktrees`            | 3       | Max idle worktrees before cleanup (home only)    |
 | `worktreeLocation`        | home    | Default location: `home` or `sibling`            |
+| `lassoTimeoutMinutes`     | 8       | Max time to wait for target session to become idle |
+| `lassoPollIntervalSeconds`| 2       | Initial polling interval when waiting            |
+| `lassoMaxPollIntervalSeconds`| 10   | Max polling interval (exponential backoff cap)   |
 
 ## Testing
 
@@ -224,7 +255,8 @@ The `cowboy` CLI provides session management:
 | `cowboy kill`      | k     | Kill a session                           |
 | `cowboy cleanup`   |       | Clean up stale data (orchestrations, worktrees, registry) |
 | `cowboy tmux`      | t     | Attach to the cowboy tmux session        |
-| `cowboy lasso`     |       | Delegate task to new session (async)     |
+| `cowboy lasso`     |       | Query another session synchronously      |
+| `cowboy lasso-async` |     | Delegate task to new session (legacy)    |
 | `cowboy posse`     |       | Coordinate multiple sessions (parallel)  |
 | `cowboy doctor`    |       | Check system dependencies                |
 
@@ -233,7 +265,9 @@ The `cowboy` CLI provides session management:
 ```bash
 cowboy new ~/project -w              # Use worktree for isolation
 cowboy new ~/project --name myname   # Custom session name
-cowboy lasso "task" -w               # Delegate with worktree
+cowboy lasso my-session "query"      # Query another session
+cowboy lasso --clean --cwd /path "q" # Query in new session
+cowboy lasso --async "task"          # Legacy async mode
 cowboy posse --plan-file plan.json   # Start posse from plan file
 ```
 

@@ -46,6 +46,10 @@ DEFAULT_CONFIG = {
     # Git worktree settings for session isolation
     "maxWorktrees": 3,  # Max permanent worktrees per repo (oldest idle ones are cleaned up)
     "worktreeLocation": "home",  # "home" for ~/.cowboy-worktrees/, "sibling" for adjacent dirs
+    # Lasso (sync session query) settings
+    "lassoTimeoutMinutes": 8,  # Max time to wait for session to become idle
+    "lassoPollIntervalSeconds": 2,  # Initial polling interval when waiting for idle
+    "lassoMaxPollIntervalSeconds": 10,  # Max polling interval (exponential backoff cap)
     # Status detection patterns (for tmux pane content matching)
     # These are brittle and may need updating if Claude Code UI changes
     "statusPatterns": {
@@ -114,6 +118,10 @@ def load_config(project_path: str | None = None) -> dict[str, Any]:
         # Worktree settings
         "CLAUDE_COWBOY_MAX_WORKTREES": ("maxWorktrees", int),
         "CLAUDE_COWBOY_WORKTREE_LOCATION": ("worktreeLocation", str),
+        # Lasso settings
+        "CLAUDE_COWBOY_LASSO_TIMEOUT": ("lassoTimeoutMinutes", int),
+        "CLAUDE_COWBOY_LASSO_POLL_INTERVAL": ("lassoPollIntervalSeconds", float),
+        "CLAUDE_COWBOY_LASSO_MAX_POLL_INTERVAL": ("lassoMaxPollIntervalSeconds", float),
     }
 
     for env_var, (config_key, converter) in env_mappings.items():

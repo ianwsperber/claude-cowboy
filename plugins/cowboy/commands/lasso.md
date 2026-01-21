@@ -1,53 +1,89 @@
 ---
 description: "Query another Claude session's context synchronously"
 argument-hint: "[@session] <query>"
-allowed-tools: Task
+allowed-tools: Bash(cowboy:*), AskUserQuestion
 ---
 
-# Lasso - Cross-Session Context Query
+# Lasso - Synchronous Session Query
 
-Query another Claude Code session for context or information. Results are returned synchronously via a subagent that loads the target session's full conversation history.
+Query another Claude Code session for context or information. The target session is resumed with a headless prompt, and results are returned synchronously.
 
 ## Arguments
 
-- `@session` (optional): Target session name, prefixed with @
-- `<query>`: Your question about that session's work
+- `@session` (optional): Target session name or UUID, prefixed with @
+- `<query>`: Your question or task for that session
 
 ## Instructions
 
-Use the Task tool to spawn a `claude-cowboy:lasso` subagent with this prompt format:
+### 1. Parse Arguments
 
+Extract from the user's input:
+- **Target**: If the input starts with `@`, extract the session name (without the `@`)
+- **Query**: The remaining text is the query
+
+### 2. Session Discovery (if no target specified)
+
+If no `@session` was provided, help the user select a session:
+
+```bash
+cowboy list --json
 ```
-Target session: [SESSION_NAME or "pick from list"]
-Query: [USER'S QUESTION]
+
+Use **AskUserQuestion** to present the available sessions and let the user pick one:
+- Show session name, status, and CWD for each
+- Filter out the current session (don't lasso yourself)
+
+### 3. Execute the Lasso
+
+Run the synchronous lasso command:
+
+```bash
+cowboy lasso <target> "<query>"
 ```
 
-**If a session name was provided** (starts with @):
-- Extract the session name (remove the @ prefix)
-- Include it in the prompt as the target session
+**Examples:**
+```bash
+# Query a specific session
+cowboy lasso my-backend-work "What files did you modify?"
 
-**If no session specified**:
-- Set target session to "pick from list"
-- The subagent will use `cowboy list` and AskUserQuestion to help the user select
+# Query by UUID
+cowboy lasso abc123-def456 "Summarize your changes"
+```
+
+### 4. Return the Response
+
+The command will:
+1. Wait for the target session to become idle (if busy)
+2. Resume the session with the query
+3. Return the response
+
+Display the response to the user.
+
+## Clean Mode
+
+For querying without resuming an existing session (starts fresh):
+
+```bash
+cowboy lasso --clean --cwd /path/to/project "Review the codebase"
+```
 
 ## Examples
 
 ```
-User: /lasso @example-claude-monorepo Where are the posse sessions you created?
-Assistant: [Spawns lasso subagent with prompt: "Target session: example-claude-monorepo\nQuery: Where are the posse sessions you created?"]
-
-User: /lasso What was the last session working on?
-Assistant: [Spawns lasso subagent with prompt: "Target session: pick from list\nQuery: What was the last session working on?"]
-→ Subagent lists sessions, asks user to pick, then answers the query
-
 User: /lasso @backend-work What API endpoints did you implement?
-Assistant: [Spawns lasso subagent targeting backend-work session]
+Assistant: [Runs: cowboy lasso backend-work "What API endpoints did you implement?"]
+Response: "I implemented 3 endpoints: /api/users, /api/auth/login, and /api/auth/logout..."
+
+User: /lasso What was the last thing you did?
+Assistant: [Runs: cowboy list --json]
+         [AskUserQuestion to select session]
+         [Runs: cowboy lasso <selected> "What was the last thing you did?"]
+Response: "I was working on the authentication module..."
 ```
 
 ## Notes
 
-- The subagent loads the target session's **full conversation transcript**
-- Results are returned inline (synchronous, not async notifications)
-- Multiple /lasso commands can run in parallel via Task tool
-- The subagent can explore the codebase if needed to answer the query
-- For advanced use cases, the subagent can search tmux sessions or old JSONL files
+- The target session is **resumed** with your query - it has full context of its prior work
+- If the target is busy, lasso waits for it to become idle (up to 8 minutes by default)
+- Use `--timeout N` to set a custom timeout in minutes
+- For async task delegation, use: `cowboy lasso --async "task description"`

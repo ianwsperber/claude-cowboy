@@ -30,7 +30,7 @@ try:
     from . import orchestration
     from . import session_context
     from .config import load_config
-    from .status_analyzer import analyze_session_status, get_status_emoji, SessionStatus
+    from .status_analyzer import analyze_session_status, get_status_emoji, SessionStatus, wait_for_session_idle
 except ImportError:
     import tmux_manager as tmux
     import session_registry as registry
@@ -38,7 +38,7 @@ except ImportError:
     import orchestration
     import session_context
     from config import load_config
-    from status_analyzer import analyze_session_status, get_status_emoji, SessionStatus
+    from status_analyzer import analyze_session_status, get_status_emoji, SessionStatus, wait_for_session_idle
 
 
 def get_sessions_for_cwd(cwd: str) -> list[str]:
@@ -604,8 +604,8 @@ def cmd_configure_status(args) -> int:
     return 0
 
 
-def cmd_lasso(args) -> int:
-    """Delegate a task to a new Claude session asynchronously.
+def cmd_lasso_async(args) -> int:
+    """Delegate a task to a new Claude session asynchronously (legacy mode).
 
     Creates a child session, starts Claude with the task, and returns immediately.
     The parent session continues working while the child executes the task.
@@ -738,6 +738,149 @@ Switch to child: tmux attach -t {child_name}
 Continuing with your work...""")
 
     return 0
+
+
+def cmd_lasso(args) -> int:
+    """Query another Claude session synchronously.
+
+    Resumes the target session with a prompt and waits for the response.
+    This is the primary lasso mode - use --async for the legacy async delegation.
+    """
+    # Check for async flag - delegate to legacy mode
+    if getattr(args, "async_mode", False):
+        # Convert args for async mode
+        args.task = " ".join(args.prompt) if args.prompt else args.target
+        return cmd_lasso_async(args)
+
+    # Get target and prompt from args
+    target = args.target or ""
+    prompt_parts = args.prompt or []
+    prompt = " ".join(prompt_parts) if prompt_parts else ""
+
+    if not prompt:
+        print("Error: No query provided", file=sys.stderr)
+        print("Usage: cowboy lasso [target] <query>", file=sys.stderr)
+        return 1
+
+    # Load config for timeout settings
+    config = load_config()
+    timeout_minutes = getattr(args, "timeout", None) or config.get("lassoTimeoutMinutes", 8)
+    timeout_seconds = timeout_minutes * 60
+
+    # Handle clean mode (new session instead of resume)
+    if getattr(args, "clean", False):
+        cwd = args.cwd if args.cwd else os.getcwd()
+        cwd = os.path.abspath(os.path.expanduser(cwd))
+
+        if not os.path.isdir(cwd):
+            print(f"Error: Directory does not exist: {cwd}", file=sys.stderr)
+            return 1
+
+        # Build /lassoed prompt with flags
+        parent_cwd = os.getcwd()
+        parent_session = os.environ.get("TMUX_PANE", "unknown")
+        lassoed_prompt = _build_lassoed_prompt(parent_cwd, parent_session, prompt)
+
+        # Run headless claude in clean mode
+        plugin_dir = os.environ.get("COWBOY_PLUGIN_DIR")
+        cmd = ["claude"]
+        if plugin_dir:
+            cmd.extend(["--plugin-dir", plugin_dir])
+        cmd.extend(["-p", lassoed_prompt])
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                cwd=cwd,
+            )
+            print(result.stdout)
+            if result.stderr:
+                print(result.stderr, file=sys.stderr)
+            return result.returncode
+        except subprocess.TimeoutExpired:
+            print(f"Error: Lasso timed out after {timeout_minutes} minutes", file=sys.stderr)
+            return 1
+        except FileNotFoundError:
+            print("Error: claude CLI not found", file=sys.stderr)
+            return 1
+
+    # Resolve target to session UUID and CWD
+    try:
+        session_uuid, cwd = session_context.resolve_lasso_target(target)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        print("\nAvailable sessions:")
+        subprocess.run(["cowboy", "list"], check=False)
+        return 1
+
+    # Wait for session to be idle
+    poll_interval = config.get("lassoPollIntervalSeconds", 2.0)
+    max_poll_interval = config.get("lassoMaxPollIntervalSeconds", 10.0)
+
+    ok, msg = wait_for_session_idle(
+        session_uuid,
+        timeout_seconds=timeout_seconds,
+        poll_interval=poll_interval,
+        max_poll_interval=max_poll_interval,
+    )
+    if not ok:
+        print(f"Error: {msg}", file=sys.stderr)
+        return 1
+    if msg:
+        print(msg, file=sys.stderr)
+
+    # Build /lassoed prompt with flags
+    parent_cwd = os.getcwd()
+    parent_session = os.environ.get("TMUX_PANE", tmux.get_current_session() or "unknown")
+    lassoed_prompt = _build_lassoed_prompt(parent_cwd, parent_session, prompt)
+
+    # Build and execute claude command
+    plugin_dir = os.environ.get("COWBOY_PLUGIN_DIR")
+    cmd = ["claude", "--resume", session_uuid]
+    if plugin_dir:
+        cmd.extend(["--plugin-dir", plugin_dir])
+    cmd.extend(["-p", lassoed_prompt])
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            cwd=cwd,
+        )
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+        return result.returncode
+    except subprocess.TimeoutExpired:
+        print(f"Error: Lasso timed out after {timeout_minutes} minutes", file=sys.stderr)
+        return 1
+    except FileNotFoundError:
+        print("Error: claude CLI not found", file=sys.stderr)
+        return 1
+
+
+def _build_lassoed_prompt(parent_cwd: str, parent_session: str, query: str) -> str:
+    """Build the /lassoed prompt with flags.
+
+    Uses flags instead of JSON to avoid shell escaping issues.
+
+    Args:
+        parent_cwd: Parent session's working directory.
+        parent_session: Parent's tmux session name.
+        query: The actual query.
+
+    Returns:
+        Formatted prompt string for /lassoed skill.
+    """
+    # Escape double quotes in query
+    escaped_query = query.replace('"', '\\"')
+    # Build prompt with flags
+    return f'/claude-cowboy:lassoed --parent-cwd "{parent_cwd}" --parent-session "{parent_session}" "{escaped_query}"'
 
 
 def cmd_lasso_context(args) -> int:
@@ -1108,14 +1251,27 @@ def main():
     # configure-status - apply status bar to all Claude sessions
     subparsers.add_parser("configure-status", help="Configure status bar for all Claude sessions")
 
-    # lasso - delegate task to new session (legacy, kept for backwards compat)
-    lasso_parser = subparsers.add_parser("lasso", help="Delegate a task to a new Claude session")
-    lasso_parser.add_argument("task", nargs="?", help="Task description")
-    lasso_parser.add_argument("--name", "-n", help="Custom name for the child session")
-    lasso_parser.add_argument("--cwd", "-c", help="Working directory (default: current)")
-    lasso_parser.add_argument("--worktree", "-w", action="store_true",
+    # lasso - query another Claude session synchronously
+    lasso_parser = subparsers.add_parser("lasso", help="Query another Claude session synchronously")
+    lasso_parser.add_argument("target", nargs="?", help="Target session (tmux name or UUID)")
+    lasso_parser.add_argument("prompt", nargs="*", help="Query/task for the session")
+    lasso_parser.add_argument("--clean", "-c", action="store_true",
+        help="Create new session instead of resuming existing")
+    lasso_parser.add_argument("--cwd", help="Working directory for clean mode (default: current)")
+    lasso_parser.add_argument("--timeout", "-t", type=int,
+        help="Timeout in minutes (default: 8)")
+    lasso_parser.add_argument("--async", dest="async_mode", action="store_true",
+        help="Use legacy async delegation mode")
+
+    # lasso-async - explicit async mode for backwards compatibility
+    lasso_async_parser = subparsers.add_parser("lasso-async",
+        help="Delegate a task to a new Claude session asynchronously (legacy)")
+    lasso_async_parser.add_argument("task", nargs="?", help="Task description")
+    lasso_async_parser.add_argument("--name", "-n", help="Custom name for the child session")
+    lasso_async_parser.add_argument("--cwd", "-c", help="Working directory (default: current)")
+    lasso_async_parser.add_argument("--worktree", "-w", action="store_true",
         help="Create session in a git worktree for isolation")
-    lasso_parser.add_argument("--worktree-location", choices=["home", "sibling"],
+    lasso_async_parser.add_argument("--worktree-location", choices=["home", "sibling"],
         help="Where to create worktrees")
 
     # lasso-context - output session context for lasso subagent
@@ -1166,6 +1322,7 @@ def main():
         "t": cmd_tmux,
         "configure-status": cmd_configure_status,
         "lasso": cmd_lasso,
+        "lasso-async": cmd_lasso_async,
         "lasso-context": cmd_lasso_context,
         "posse": cmd_posse,
         "doctor": cmd_doctor,
