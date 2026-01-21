@@ -94,9 +94,19 @@ def configure_status_bar(session_name: str | None = None) -> bool:
             return True
 
         # Set status-left to call our status_line.py script
-        lib_dir = Path(__file__).parent
+        # Use .resolve() to get absolute path from the installed package location
+        lib_dir = Path(__file__).resolve().parent
         status_script = lib_dir / "status_line.py"
-        status_left = f"#(python3 {status_script}) "
+
+        # Verify the script exists before configuring
+        if not status_script.exists():
+            if is_debug_enabled():
+                print(f"[tmux] status_line.py not found at {status_script}")
+            return True  # Don't fail, just skip status bar customization
+
+        # Pass --session #S so the script knows which session to query
+        # tmux expands #S to the session name at runtime
+        status_left = f"#(python3 {status_script} --session #S) "
         _run_tmux("set-option", "-t", name, "status-left", status_left, check=False)
 
         # Set status-left-length to accommodate session name, branch, cwd, and counts
