@@ -103,7 +103,7 @@ mkdir -p "$LOCAL_BIN"
 cat > "$LOCAL_BIN/cowboy_localdev" << EOF
 #!/bin/bash
 # Claude Cowboy local dev: start claude in tmux with the local plugin loaded
-export COWBOY_PLUGIN_DIR="$PROJECT_DIR"
+export COWBOY_PLUGIN_DIR="$PROJECT_DIR/plugins/cowboy"
 exec cowboy "\$@"
 EOF
 

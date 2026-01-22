@@ -10,7 +10,7 @@
     {
       "name": "cowboy",
       "description": "Multi-session monitor and orchestrator for Claude Code. View all active sessions, their status, and enable cross-session communication via commands like /sessions, /lasso, and /posse.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "source": "./plugins/cowboy",
       "category": "productivity"
     }
