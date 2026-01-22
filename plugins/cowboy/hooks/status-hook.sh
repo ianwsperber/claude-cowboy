@@ -97,12 +97,12 @@ case "$HOOK_TYPE" in
 
         # Configure tmux status bar for this session
         if [ -n "$TMUX_SESSION" ]; then
-            # Get the path to status_line.py
-            STATUS_SCRIPT="$PLUGIN_DIR/lib/status_line.py"
+            # Get the path to status_line.sh (in same hooks directory)
+            STATUS_SCRIPT="$PLUGIN_DIR/hooks/status_line.sh"
 
             # Configure status-left to call our script with session name
             # #S is expanded by tmux to the session name when rendering
-            tmux set-option -t "$TMUX_SESSION" status-left "#(python3 $STATUS_SCRIPT --session #S) " 2>/dev/null || true
+            tmux set-option -t "$TMUX_SESSION" status-left "#($STATUS_SCRIPT --session #S) " 2>/dev/null || true
 
             # Set length to accommodate all content
             tmux set-option -t "$TMUX_SESSION" status-left-length 100 2>/dev/null || true
