@@ -72,8 +72,9 @@ In Claude Code, run:
 
 This enables:
 - `/sessions` - List all active Claude Code sessions
-- `/lasso` - Delegate tasks to new sessions asynchronously
+- `/lasso` - Query other sessions synchronously
 - `/posse` - Coordinate multiple parallel sessions
+- `/outlaw` - Get external code review from Gemini CLI
 - Status tracking hooks (working/done/needs attention)
 
 ### Verify Installation
